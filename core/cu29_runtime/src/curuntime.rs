@@ -2,6 +2,8 @@
 //! It is exposed to the user via the `copper_runtime` macro injecting it as a field in their application struct.
 //!
 
+#[cfg(feature = "std")]
+use crate::config::BackgroundConfig;
 use crate::config::{ComponentConfig, Node, DEFAULT_KEYFRAME_INTERVAL};
 use crate::config::{CuConfig, CuGraph, NodeId, RuntimeConfig};
 use crate::copperlist::{CopperList, CopperListState, CuListZeroedInit, CuListsManager};
@@ -232,6 +234,7 @@ impl<
         tasks_instanciator: impl for<'c> Fn(
             Vec<Option<&'c ComponentConfig>>,
             Arc<ThreadPool>,
+            Vec<Option<BackgroundConfig>>,
         ) -> CuResult<CT>,
         monitor_instanciator: impl Fn(&CuConfig) -> M,
         copperlists_logger: impl WriteStream<CopperList<P>> + 'static,
@@ -244,6 +247,12 @@ impl<
             .map(|(_, node)| node.get_instance_config())
             .collect();
 
+        let background_configs: Vec<Option<BackgroundConfig>> = graph
+            .get_all_nodes()
+            .iter()
+            .map(|(_, node)| node.get_background_config().cloned())
+            .collect();
+
         // TODO: make that configurable
 
         let threadpool = Arc::new(
@@ -253,7 +262,11 @@ impl<
                 .expect("Could not create the threadpool"),
         );
 
-        let tasks = tasks_instanciator(all_instances_configs, threadpool.clone())?;
+        let tasks = tasks_instanciator(
+            all_instances_configs,
+            threadpool.clone(),
+            background_configs,
+        )?;
         let monitor = monitor_instanciator(config);
 
         let (copperlists_logger, keyframes_logger, keyframe_interval) = match &config.logging {
@@ -786,6 +799,7 @@ mod tests {
     fn tasks_instanciator(
         all_instances_configs: Vec<Option<&ComponentConfig>>,
         _threadpool: Arc<ThreadPool>,
+        _background_configs: Vec<Option<BackgroundConfig>>,
     ) -> CuResult<Tasks> {
         Ok((
             TestSource::new(all_instances_configs[0])?,

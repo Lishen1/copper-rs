@@ -41,6 +41,8 @@ hashbrown = { workspace = true }
 # std only dependencies
 clap = { workspace = true, optional = true }             # CLI
 rayon = { workspace = true, optional = true }            # Used for async tasks
+affinity = { version =  "0.1", optional = true}
+
 tempfile = { workspace = true, optional = true }         # only used in CLI for svg generation
 object-pool = { version = "0.6", optional = true }  # used for large object pooling, this will never happen in no-std
 
@@ -55,5 +57,5 @@ cudarc = { version = "0.17", optional = true, features = ["cuda-version-from-bui
 default = ["std"]
 cuda = ["dep:cudarc"]
 macro_debug = []
-std = ["dep:clap", "dep:rayon", "dep:tempfile", "dep:object-pool", "ron/std", "cu29-clock/std", "cu29-log/std", "cu29-log-runtime/std", "cu29-traits/std", "cu29-unifiedlog/std", "cu29-value/std", "petgraph/std"]
+std = ["dep:clap", "dep:rayon", "dep:affinity", "dep:tempfile", "dep:object-pool", "ron/std", "cu29-clock/std", "cu29-log/std", "cu29-log-runtime/std", "cu29-traits/std", "cu29-unifiedlog/std", "cu29-value/std", "petgraph/std"]
 memory_monitoring = []

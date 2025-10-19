@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use rkv::backend::{Lmdb, LmdbDatabase, LmdbEnvironment, LmdbRwTransaction};
+use rkv::backend::{SafeMode, SafeModeDatabase, SafeModeEnvironment, SafeModeRwTransaction};
 use rkv::{MultiStore, Rkv, SingleStore, StoreOptions, Value, Writer};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-type SStore = SingleStore<LmdbDatabase>;
-type MStore = MultiStore<LmdbDatabase>;
+type SStore = SingleStore<SafeModeDatabase>;
+type MStore = MultiStore<SafeModeDatabase>;
 type IndexType = u32;
 
 /// The name of the directory where the log index is stored.
@@ -40,7 +40,7 @@ fn read_u32_le(bytes: &[u8]) -> u32 {
 pub fn read_interned_strings(index: &Path) -> Result<Vec<String>> {
     let mut all_strings = Vec::<String>::new();
     let env =
-        Rkv::new::<Lmdb>(index).context("Could not open the string index. Check the path.")?;
+        Rkv::new::<SafeMode>(index).context("Could not open the string index. Check the path.")?;
 
     let index_to_string = env
         .open_single("index_to_string", StoreOptions::default())
@@ -73,10 +73,10 @@ macro_rules! build_log {
     };
 }
 
-static RKV: OnceLock<Mutex<Rkv<LmdbEnvironment>>> = OnceLock::new();
+static RKV: OnceLock<Mutex<Rkv<SafeModeEnvironment>>> = OnceLock::new();
 static DBS: OnceLock<Mutex<(SStore, SStore, SStore, MStore)>> = OnceLock::new();
 
-fn rkv() -> &'static Mutex<Rkv<LmdbEnvironment>> {
+fn rkv() -> &'static Mutex<Rkv<SafeModeEnvironment>> {
     RKV.get_or_init(|| {
         let target_dir = default_log_index_dir();
 
@@ -97,7 +97,7 @@ fn rkv() -> &'static Mutex<Rkv<LmdbEnvironment>> {
             );
         }
 
-        let env = Rkv::new::<Lmdb>(&target_dir).unwrap();
+        let env = Rkv::new::<SafeMode>(&target_dir).unwrap();
         Mutex::new(env)
     })
 }
@@ -168,7 +168,7 @@ pub fn record_callsite(filename: &str, line_number: u32) -> Option<IndexType> {
 
 const COUNTER_KEY: &str = "__counter__";
 fn get_next_index(
-    writer: &mut Writer<LmdbRwTransaction>,
+    writer: &mut Writer<SafeModeRwTransaction>,
     counter_store: &SStore,
 ) -> Result<IndexType, Box<dyn std::error::Error>> {
     let current_counter = match counter_store.get(writer, COUNTER_KEY)? {

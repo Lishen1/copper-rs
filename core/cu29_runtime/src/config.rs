@@ -82,6 +82,13 @@ impl ComponentConfig {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct BackgroundConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_id: Option<usize>,
+    //TODO: add thread name
+}
+
 // The configuration Serialization format is as follows:
 // (
 //   tasks : [ (id: "toto", type: "zorglub::MyType", config: {...}),
@@ -231,7 +238,7 @@ pub struct Node {
     /// Run this task in the background:
     /// ie. Will be set to run on a background thread and until it is finished `CuTask::process` will return None.
     #[serde(skip_serializing_if = "Option::is_none")]
-    background: Option<bool>,
+    background: Option<BackgroundConfig>,
 
     /// Option to include/exclude stubbing for simulation.
     /// By default, sources and sinks are replaces (stubbed) by the runtime to avoid trying to compile hardware specific code for sensing or actuation.
@@ -278,7 +285,12 @@ impl Node {
 
     #[allow(dead_code)]
     pub fn is_background(&self) -> bool {
-        self.background.unwrap_or(false)
+        self.background.is_some()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_background_config(&self) -> Option<&BackgroundConfig> {
+        self.background.as_ref()
     }
 
     #[allow(dead_code)]

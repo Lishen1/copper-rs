@@ -1,6 +1,7 @@
-use crate::config::ComponentConfig;
+use crate::config::{BackgroundConfig, ComponentConfig};
 use crate::cutask::{CuMsg, CuMsgPayload, CuTask, Freezable};
 use cu29_clock::RobotClock;
+use cu29_log_derive::{error, info};
 use cu29_traits::CuResult;
 use rayon::ThreadPool;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,6 +15,7 @@ where
     output: Arc<Mutex<CuMsg<O>>>,
     processing: Arc<Mutex<bool>>, // TODO: an atomic should be enough.
     tp: Arc<ThreadPool>,
+    background_config: BackgroundConfig,
 }
 
 impl<T, O> CuAsyncTask<T, O>
@@ -22,7 +24,11 @@ where
     O: CuMsgPayload + Send + 'static,
 {
     #[allow(unused)]
-    pub fn new(config: Option<&ComponentConfig>, tp: Arc<ThreadPool>) -> CuResult<Self> {
+    pub fn new(
+        config: Option<&ComponentConfig>,
+        tp: Arc<ThreadPool>,
+        background_config: BackgroundConfig,
+    ) -> CuResult<Self> {
         let task = Arc::new(Mutex::new(T::new(config)?));
         let output = Arc::new(Mutex::new(CuMsg::default()));
         Ok(Self {
@@ -30,6 +36,7 @@ where
             output,
             processing: Arc::new(Mutex::new(false)),
             tp,
+            background_config,
         })
     }
 }
@@ -80,7 +87,15 @@ where
             let output = self.output.clone();
             let task = self.task.clone();
             let processing = self.processing.clone();
+            let core_id = self.background_config.core_id.clone();
             move || {
+                if let Some(core_id) = core_id {
+                    let res = affinity::set_thread_affinity(&[core_id]);
+                    match res {
+                        Err(err) => error!("set thread affinity: {}", err),
+                        Ok(_) => info!("bacground thread bound to core {}", core_id),
+                    }
+                }
                 let input_ref: &CuMsg<I> = &input;
                 let mut output: MutexGuard<CuMsg<O>> = output.lock().unwrap();
 
@@ -147,8 +162,9 @@ mod tests {
 
         let config = ComponentConfig::default();
         let clock = RobotClock::default();
+        let background_config = BackgroundConfig::default();
         let mut async_task: CuAsyncTask<TestTask, u32> =
-            CuAsyncTask::new(Some(&config), tp).unwrap();
+            CuAsyncTask::new(Some(&config), tp, background_config).unwrap();
         let input = CuMsg::new(Some(42u32));
         let mut output = CuMsg::new(None);
 

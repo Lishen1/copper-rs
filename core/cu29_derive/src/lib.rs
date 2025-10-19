@@ -11,8 +11,8 @@ use syn::{
 #[cfg(feature = "macro_debug")]
 use crate::format::rustfmt_generated_code;
 use crate::utils::config_id_to_enum;
-use cu29_runtime::config::CuConfig;
 use cu29_runtime::config::{read_configuration, CuGraph};
+use cu29_runtime::config::{BackgroundConfig, CuConfig};
 use cu29_runtime::curuntime::{
     compute_runtime_plan, find_task_type_for_id, CuExecutionLoop, CuExecutionUnit, CuTaskType,
 };
@@ -456,12 +456,12 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
             .iter()
             .zip(&task_specs.cutypes)
             .zip(&task_specs.sim_task_types)
-            .zip(&task_specs.background_flags)
+            .zip(&task_specs.background_configs)
             .zip(&task_specs.run_in_sim_flags)
-            .map(|((((task_id, task_type), sim_type), background), run_in_sim)| {
+            .map(|((((task_id, task_type), sim_type), background_config), run_in_sim)| {
                 match task_type {
                     CuTaskType::Source => {
-                        if *background {
+                        if background_config.is_some() {
                             panic!("CuSrcTask {task_id} cannot be a background task, it should be a regular task.");
                         }
                         if *run_in_sim {
@@ -480,7 +480,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                         sim_type.clone()
                     },
                     CuTaskType::Sink => {
-                        if *background {
+                        if background_config.is_some() {
                             panic!("CuSinkTask {task_id} cannot be a background task, it should be a regular task.");
                         }
 
@@ -529,14 +529,14 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
             }
         }).collect::<Vec<_>>();
 
-        let task_instances_init_code = task_specs.instantiation_types.iter().zip(&task_specs.background_flags).enumerate().map(|(index, (task_type, background))| {
+        let task_instances_init_code = task_specs.instantiation_types.iter().zip(&task_specs.background_configs).enumerate().map(|(index, (task_type, background_config))| {
             let additional_error_info = format!(
                 "Failed to get create instance for {}, instance index {}.",
                 task_specs.type_names[index], index
             );
-            if *background {
+            if background_config.is_some()  {
                 quote! {
-                    #task_type::new(all_instances_configs[#index], threadpool.clone()).map_err(|e| e.add_cause(#additional_error_info))?
+                    #task_type::new(all_instances_configs[#index], threadpool.clone(), background_configs[#index].clone().unwrap()).map_err(|e| e.add_cause(#additional_error_info))?
                 }
             } else {
                 quote! {
@@ -1671,7 +1671,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
 
         let tasks_instanciator = if std {
             quote! {
-                pub fn tasks_instanciator<'c>(all_instances_configs: Vec<Option<&'c ComponentConfig>>, threadpool: Arc<ThreadPool>) -> CuResult<CuTasks> {
+                pub fn tasks_instanciator<'c>(all_instances_configs: Vec<Option<&'c ComponentConfig>>, threadpool: Arc<ThreadPool>, background_configs: Vec<Option<BackgroundConfig>>) -> CuResult<CuTasks> {
                     Ok(( #(#task_instances_init_code),*, ))
                 }
             }
@@ -1860,7 +1860,7 @@ fn extract_tasks_output_types(graph: &CuGraph) -> Vec<Option<Type>> {
 struct CuTaskSpecSet {
     pub ids: Vec<String>,
     pub cutypes: Vec<CuTaskType>,
-    pub background_flags: Vec<bool>,
+    pub background_configs: Vec<Option<BackgroundConfig>>,
     pub logging_enabled: Vec<bool>,
     pub type_names: Vec<String>,
     pub task_types: Vec<Type>,
@@ -1885,9 +1885,9 @@ impl CuTaskSpecSet {
             .map(|(id, _)| find_task_type_for_id(graph, *id))
             .collect();
 
-        let background_flags: Vec<bool> = all_id_nodes
+        let background_configs: Vec<Option<BackgroundConfig>> = all_id_nodes
             .iter()
-            .map(|(_, node)| node.is_background())
+            .map(|(_, node)| node.get_background_config().cloned())
             .collect();
 
         let logging_enabled: Vec<bool> = all_id_nodes
@@ -1904,13 +1904,13 @@ impl CuTaskSpecSet {
 
         let task_types = type_names
             .iter()
-            .zip(background_flags.iter())
+            .zip(background_configs.iter().map(|cfg| cfg.as_ref()))
             .zip(output_types.iter())
-            .map(|((name, &background), output_type)| {
+            .map(|((name, background_config), output_type)| {
                 let name_type = parse_str::<Type>(name).unwrap_or_else(|error| {
                     panic!("Could not transform {name} into a Task Rust type: {error}");
                 });
-                if background {
+                if background_config.is_some() {
                     if let Some(output_type) = output_type {
                         parse_quote!(CuAsyncTask<#name_type, #output_type>)
                     } else {
@@ -1924,13 +1924,13 @@ impl CuTaskSpecSet {
 
         let instantiation_types = type_names
             .iter()
-            .zip(background_flags.iter())
+            .zip(background_configs.iter().map(|cfg| cfg.as_ref()))
             .zip(output_types.iter())
-            .map(|((name, &background), output_type)| {
+            .map(|((name, background_config), output_type)| {
                 let name_type = parse_str::<Type>(name).unwrap_or_else(|error| {
                     panic!("Could not transform {name} into a Task Rust type: {error}");
                 });
-                if background {
+                if background_config.is_some() {
                     if let Some(output_type) = output_type {
                         parse_quote!(CuAsyncTask::<#name_type, #output_type>)
                     } else {
@@ -1960,7 +1960,7 @@ impl CuTaskSpecSet {
         Self {
             ids,
             cutypes,
-            background_flags,
+            background_configs,
             logging_enabled,
             type_names,
             task_types,
